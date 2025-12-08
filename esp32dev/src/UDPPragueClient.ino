@@ -4,6 +4,16 @@
 #include "prague_cc.h"
 #include <errno.h>
 
+// ===== CONGESTION CONTROL MODE =====
+// Default: full Prague CC (adaptive). Uncomment for a fixed baseline mode
+// that does not adapt window/rate based on Prague feedback.
+// #define CC_MODE_BASELINE
+
+// ===== ECN SENDER MARKING =====
+// ECN_SENDER_ENABLE = 1 -> mark packets as ECN-capable (ECT(1))
+// ECN_SENDER_ENABLE = 0 -> do not request ECN (Not-ECT)
+#define ECN_SENDER_ENABLE 1
+
 // ===== WIFI CONFIG =====
 const char* ssid     = "JEED-TH001";
 const char* password = "Test";
@@ -214,7 +224,9 @@ void receiveAcks() {
     rtt_sum += rtt;
     rtt_count++;
 
-    // Feed Prague CC
+    // Feed congestion control (Prague or baseline)
+#ifndef CC_MODE_BASELINE
+    // Full Prague CC: update rate/window/burst based on feedback
     prague.PacketReceived(ack.timestamp, ack.echoed_timestamp);
     prague.ACKReceived(
         ack.packets_received,
@@ -227,8 +239,14 @@ void receiveAcks() {
 
     prague.GetCCInfo(pacing_rate, packet_window, packet_burst, packet_size);
 
-    // ===== LIMITAR JANELA =====
+    // Limit window to what the ESP32 Wi‑Fi can handle
     packet_window = min(packet_window, (count_tp)MAX_WINDOW_ESP32);
+#else
+    // Baseline mode: keep a fixed window/burst, do not adapt
+    packet_window = MAX_WINDOW_ESP32;
+    packet_burst  = MAX_BURST_ESP32;
+    // pacing_rate/packet_size are taken from the initial PragueCC config in setup()
+#endif
 
     // ===== RECALCULAR INFLIGHT REAL =====
     if (ack.packets_received <= packets_sent) {
@@ -344,7 +362,10 @@ void setup() {
     Serial.printf("IP: %s\n\n", WiFi.localIP().toString().c_str());
 
     sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    int tos = 0x01;
+
+    // Configure IP TOS / ECN bits for outgoing packets
+    // Low 2 bits are ECN: 00 = Not-ECT, 01 = ECT(1)
+    int tos = (ECN_SENDER_ENABLE ? 0x01 : 0x00);
     setsockopt(sockfd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
 
     dest_addr.sin_family = AF_INET;

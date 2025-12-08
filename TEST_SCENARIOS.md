@@ -36,22 +36,47 @@ You can optionally save a copy of the notebook (or an HTML export) alongside the
 
 ---
 
-## 2. Global Variables and Where to Configure Them
+## 2. Knobs and Where to Configure Them
 
-These are the main knobs you will vary across scenarios. Exact names may differ in code/router UI; adapt as needed.
+There are **two groups** of parameters:
 
-| Variable              | Description                                                          | Configured Where                                |
+- what you change **in this repository** (ESP32 client), and
+- what you change **in the network environment** (router, `tc`, emulator, etc.).
+
+### 2.1 ESP32 client (in the repo)
+
+All of these live in `esp32dev/src/UDPPragueClient.ino`.
+
+| Knob / Macro          | Description                                                                  | How to change                                                |
+| --------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `CC_MODE_BASELINE`   | When defined, uses a fixed baseline sender (no Prague feedback adaptation). | At the top of `UDPPragueClient.ino` – `#define CC_MODE_BASELINE` or comment it out. |
+| `SCENARIO_*`         | Chooses payload/duration pattern: `SCENARIO_BASELINE`, `SCENARIO_MEDIUM`, etc. | Comment/uncomment one of the `#define SCENARIO_...` lines.   |
+| `EXTRA_PAYLOAD_SIZE` | Extra bytes per packet (affects effective sending rate).                     | Set inside each `#ifdef SCENARIO_...` block.                 |
+| `TEST_DURATION_SEC`  | Duration of each experiment (seconds).                                       | Set inside each `#ifdef SCENARIO_...` block.                 |
+| `MAX_WINDOW_ESP32`   | Upper bound on in-flight packets that the Wi‑Fi link will allow.            | Constant near the top of `UDPPragueClient.ino`.             |
+| `MAX_BURST_ESP32`    | Upper bound on burst size per send loop.                                    | Constant near the top of `UDPPragueClient.ino`.             |
+
+The **effective send rate** (what you later see as Mbps on the server) is a result of:
+
+- `EXTRA_PAYLOAD_SIZE` (packet size),
+- congestion control mode (Prague vs baseline), and
+- window/burst limits (`MAX_WINDOW_ESP32`, `MAX_BURST_ESP32`).
+
+You do **not** set `SEND_RATE_MBPS` directly in the code; instead, you choose a scenario (and possibly tweak payload/window) and then measure the resulting rate in the logs.
+
+### 2.2 Network / router side (outside the repo)
+
+These are configured in your router, Linux `tc`, emulator, etc. They do not live as variables in this repository; you just record which values you used for each scenario.
+
+| Parameter             | Description                                                          | Configured Where                                |
 | --------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
-| `CC_MODE`            | Congestion control behavior: `PRAGUE` vs `BASELINE` (no ECN logic). | ESP32 client code (`AsyncUDPClient.ino`).      |
-| `SEND_RATE_MBPS`     | Target sending rate of the ESP32 client.                            | ESP32 client code / configuration.             |
-| `TEST_DURATION_S`    | Duration of each experiment.                                        | Test script / manual timer.                    |
 | `RTT_BASE_MS`        | Approximate base RTT of the path (without queueing).                | Network topology (router, emulator, etc.).     |
 | `QUEUE_TYPE`         | Queueing discipline: `DropTail`, `AQM-RED`, `AQM-PIE`, `L4S-dual`.  | Router / bottleneck configuration.             |
 | `ECN_ENABLED`        | Whether ECN marking is enabled on the bottleneck queue.             | Router / OS (e.g., `sysctl`, queue settings).  |
 | `LINK_CAPACITY_MBPS` | Bottleneck link capacity.                                           | Router / traffic shaper.                       |
 | `BUFFER_TARGET_MS`   | Target queueing delay / buffer size (when configurable).            | Router / AQM profile.                          |
 
-When you run a scenario, make a short note in a `README.md` inside that scenario folder documenting the actual values used (e.g., `SEND_RATE_MBPS=5`, `LINK_CAPACITY_MBPS=2`, etc.).
+When you run a scenario, make a short note in a `README.md` inside that scenario folder documenting the actual values used (e.g., `EXTRA_PAYLOAD_SIZE=500`, `LINK_CAPACITY_MBPS=2`, etc.).
 
 ---
 
