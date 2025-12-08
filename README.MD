@@ -89,4 +89,7 @@ For issues or questions related to this specific implementation, please refer to
 
 ---
 
+Test on server
+sudo tcpdump -i any -vvv -n 'udp and port 5005'
+
 *Last Updated: November 2025*
