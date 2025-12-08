@@ -5,8 +5,8 @@
 #include <errno.h>
 
 // ===== WIFI CONFIG =====
-const char* ssid     = "std-master";
-const char* password = "std-master#80";
+const char* ssid     = "JEED-TH001";
+const char* password = "F@m1L1@;,:001";
 
 // ===== RECEIVER CONFIG =====
 const char* server_ip   = "3.16.158.161";
@@ -82,6 +82,13 @@ unsigned long error_count = 0;     // total de erros sendto()
 unsigned long enobufs_count = 0;   // especificamente ENOBUFS
 unsigned long other_errors = 0;    // outros erros sendto()
 
+// ===== CLIENT RTT/JITTER METRICS =====
+time_tp last_rtt = 0;
+bool    has_last_rtt = false;
+time_tp rtt_min = 0, rtt_max = 0;
+int64_t rtt_sum = 0;
+uint32_t rtt_count = 0;
+
 #pragma pack(push, 1)
 
 struct datamessage_t {
@@ -154,41 +161,106 @@ void receiveAcks() {
         &socklen
     );
 
-    if (len == sizeof(ackmessage_t)) {
-        ack.ntoh();
-        if (ack.type != 17) return;
-
-        prague.PacketReceived(ack.timestamp, ack.echoed_timestamp);
-        prague.ACKReceived(
-            ack.packets_received,
-            ack.packets_CE,
-            ack.packets_lost,
-            packets_sent,
-            ack.error_L4S,
-            inflight
-        );
-
-        prague.GetCCInfo(pacing_rate, packet_window, packet_burst, packet_size);
-
-        // ===== LIMITAR JANELA =====
-        packet_window = min(packet_window, (count_tp)MAX_WINDOW_ESP32);
-
-        // ===== RECALCULAR INFLIGHT REAL =====
-        if (ack.packets_received <= packets_sent)
-            inflight = packets_sent - ack.packets_received;
-        else
-            inflight = 0;
-
-        Serial.printf(
-            "[ACK] recv=%lu CE=%lu lost=%lu inflight=%ld burstMax=%ld win=%ld\n",
-            (unsigned long)ack.packets_received,
-            (unsigned long)ack.packets_CE,
-            (unsigned long)ack.packets_lost,
-            (long)inflight,
-            (long)MAX_SAFE_BURST,
-            (long)packet_window
-        );
+    if (len <= 0) {
+        return; // nothing to read
     }
+
+    // Basic size check (future-proof if server ever changes struct)
+    if (len != (int)sizeof(ackmessage_t)) {
+        Serial.printf("[ACK-IGNORED] len=%d (expected %u)\n", len, (unsigned)sizeof(ackmessage_t));
+        return;
+    }
+
+    ack.ntoh();
+
+    if (ack.type != 17) {
+        Serial.printf("[ACK-IGNORED] invalid type=%u\n", (unsigned)ack.type);
+        return;
+    }
+
+    // Sanity check on counters (defensive)
+    if (ack.packets_received < 0 || ack.packets_CE < 0 || ack.packets_lost < 0) {
+        Serial.printf("[ACK-IGNORED] negative counters: recv=%ld CE=%ld lost=%ld\n",
+                      (long)ack.packets_received,
+                      (long)ack.packets_CE,
+                      (long)ack.packets_lost);
+        return;
+    }
+
+    // ===== RTT & JITTER (client-side) =====
+    time_tp rtt = ack.echoed_timestamp - ack.timestamp;
+    if (rtt < 0) {
+        // defensivo: se vier negativo por wrap, ignore esta amostra
+        rtt = 0;
+    }
+
+    time_tp jitter = 0;
+    if (has_last_rtt) {
+        time_tp diff = rtt - last_rtt;
+        if (diff < 0) diff = -diff;
+        jitter = diff;
+    } else {
+        has_last_rtt = true;
+    }
+    last_rtt = rtt;
+
+    // stats agregadas
+    if (rtt_count == 0) {
+        rtt_min = rtt_max = rtt;
+    } else {
+        if (rtt < rtt_min) rtt_min = rtt;
+        if (rtt > rtt_max) rtt_max = rtt;
+    }
+    rtt_sum += rtt;
+    rtt_count++;
+
+    // Feed Prague CC
+    prague.PacketReceived(ack.timestamp, ack.echoed_timestamp);
+    prague.ACKReceived(
+        ack.packets_received,
+        ack.packets_CE,
+        ack.packets_lost,
+        packets_sent,
+        ack.error_L4S,
+        inflight
+    );
+
+    prague.GetCCInfo(pacing_rate, packet_window, packet_burst, packet_size);
+
+    // ===== LIMITAR JANELA =====
+    packet_window = min(packet_window, (count_tp)MAX_WINDOW_ESP32);
+
+    // ===== RECALCULAR INFLIGHT REAL =====
+    if (ack.packets_received <= packets_sent) {
+        inflight = packets_sent - ack.packets_received;
+    } else {
+        inflight = 0;
+    }
+
+    Serial.printf(
+        "[ACK] recv=%lu CE=%lu lost=%lu inflight=%ld burstMax=%ld win=%ld L4Serr=%d\n",
+        (unsigned long)ack.packets_received,
+        (unsigned long)ack.packets_CE,
+        (unsigned long)ack.packets_lost,
+        (long)inflight,
+        (long)MAX_SAFE_BURST,
+        (long)packet_window,
+        (int)ack.error_L4S
+    );
+
+    // ===== LOG ESTRUTURADO PARA ANÁLISE (CSTATS) =====
+    unsigned long ms_since_start = millis() - test_start_ms;
+    Serial.printf(
+        "CSTATS;%lu;%ld;%ld;%ld;%ld;%ld;%ld;%llu\n",
+        ms_since_start,
+        (long)ack.packets_received,
+        (long)inflight,
+        (long)rtt,
+        (long)jitter,
+        (long)packet_window,
+        (long)packet_burst,
+        (unsigned long long)pacing_rate
+    );
 }
 
 // ===== SEND DATA PACKET =====
@@ -266,7 +338,7 @@ void setup() {
 
     while (WiFi.status() != WL_CONNECTED) {
         delay(250);
-        Serial.print(".");
+        Serial.print("*");
     }
     Serial.printf("\nWiFi RSSI: %d dBm\n", WiFi.RSSI());
     Serial.printf("IP: %s\n\n", WiFi.localIP().toString().c_str());
@@ -340,9 +412,21 @@ void loop() {
     }
 
     if (burst_count > 0) {
+        // Purista: usar sempre o pacing_rate do Prague;
+        // só cai para PRAGUE_MINRATE se for realmente inválido (<= 0).
+        rate_tp rate = pacing_rate > 0 ? pacing_rate : PRAGUE_MINRATE;
+
         time_tp burst_duration =
-            (packet_size * burst_count * 1000000ULL) /
-            (pacing_rate > 0 ? pacing_rate : 1);
+            (time_tp)((packet_size * (size_tp)burst_count * 1000000ULL) / rate);
+
+        // Apenas logar se algo parecer fora do normal
+        if (burst_duration <= 0) {
+            Serial.printf("[WARN] burst_duration=%ld us (rate=%llu, burst=%ld, pkt=%llu)\n",
+                          (long)burst_duration,
+                          (unsigned long long)rate,
+                          (long)burst_count,
+                          (unsigned long long)packet_size);
+        }
 
         nextSend = burst_start + burst_duration;
     }
