@@ -1,1 +1,92 @@
+# macOS
+.DS_Store
+.AppleDouble
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# VS Code
+.vscode/
+.history/
+*.code-workspace
+
+# Python / Notebooks
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+*.out
+*.tmp
+*.ipynb_checkpoints/
+.env
+.venv
+env/
+venv/
+pip-wheel-metadata/
+.build/
+
+# Jupyter kernel / cache
+*.nbconvert.ipynb
+
+# Arduino / ESP32 build (Arduino CLI / Arduino IDE)
+*.elf
+*.bin
+*.hex
+*.eep
+*.map
+*.lst
+*.lss
+build/
+arduino_build_*/
+arduino_cache_*/
+
+# PlatformIO
+.pio/
+.piolibdeps/
+.ccls-cache/
+.clangd/
+
+# CMake / Make
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+build*/
+out/
+dist/
+
+# Logs
+*.pcap
+*.pcapng
+*.csv
+*.dat
+*.metrics
+*.log.*
+logs/
+results/
+captures/
+
+# Dependências locais
+node_modules/
+bower_components/
+
+# system files
+.ignore
+Thumbs.db
+ehthumbs.db
+Icon?
+Desktop.ini
+$RECYCLE.BIN/
+
+#other
+*.swo
+*.orig
+*.bak
+*.tmp
+*.temp
+.~*
+
 /ignore
