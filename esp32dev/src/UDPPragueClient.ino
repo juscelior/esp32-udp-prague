@@ -6,7 +6,7 @@
 
 // ===== WIFI CONFIG =====
 const char* ssid     = "JEED-TH001";
-const char* password = "F@m1L1@;,:001";
+const char* password = "Test";
 
 // ===== RECEIVER CONFIG =====
 const char* server_ip   = "3.16.158.161";
