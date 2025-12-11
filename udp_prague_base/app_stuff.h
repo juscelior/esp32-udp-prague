@@ -484,11 +484,19 @@ struct AppStuff
                           ((pkts_received - prev_pkts > 0) ? 100.0f * (pkts_lost - prev_losts) / (pkts_received - prev_pkts) : 0.0f) :
                           ((prev_pkts > 0) ? 100.0f * (prev_losts) / (prev_pkts) : 0.0f);
         if (!json_output) {
-            printf("[RECVER]: %.2f sec, Rcvd: %.3f Mbps, Sent: %.3f Mbps, %s: %.3f ms, Mark: %.2f%%(%d/%d), Lost: %.2f%%(%d/%d)\n",
-                   now / 1000000.0f, rate_rcvd, rate_sent, (!rfc8888_ack)? "RTT": "ATO", rtt,
-                   mark_prob, (!rfc8888_ack) ? (pkts_CE - prev_marks) : prev_marks,
-                   (!rfc8888_ack) ? (pkts_received - prev_pkts) : prev_pkts, loss_prob,
-                   (!rfc8888_ack) ? (pkts_lost - prev_losts) : prev_losts, (!rfc8888_ack) ? (pkts_received - prev_pkts) : prev_pkts);
+            if (!rfc8888_ack) {
+                // Sem RFC8888 não temos RTT confiável no servidor; exibir RTT: N/A
+                printf("[RECVER]: %.2f sec, Rcvd: %.3f Mbps, Sent: %.3f Mbps, RTT: N/A, Mark: %.2f%%(%d/%d), Lost: %.2f%%(%d/%d)\n",
+                       now / 1000000.0f, rate_rcvd, rate_sent,
+                       mark_prob, pkts_CE - prev_marks, pkts_received - prev_pkts,
+                       loss_prob, pkts_lost - prev_losts, pkts_received - prev_pkts);
+            } else {
+                // Modo RFC8888: ATO (Average Time Offset) com RTT calculado a partir dos reports
+                printf("[RECVER]: %.2f sec, Rcvd: %.3f Mbps, Sent: %.3f Mbps, ATO: %.3f ms, Mark: %.2f%%(%d/%d), Lost: %.2f%%(%d/%d)\n",
+                       now / 1000000.0f, rate_rcvd, rate_sent, rtt,
+                       mark_prob, prev_marks, prev_pkts,
+                       loss_prob, prev_losts, prev_pkts);
+            }
         } else {
             if (jw.reset() == 0) {
                 jw.add_format_string("name", rept_name, "%s");

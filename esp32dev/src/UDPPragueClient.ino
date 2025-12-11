@@ -27,9 +27,9 @@ const char* server_ip   = "3.16.158.161";
 const int   server_port = 5005;
 
 // ===== TEST SCENARIO CONFIGURATION =====
-#define SCENARIO_BASELINE
+//#define SCENARIO_BASELINE
 //#define SCENARIO_MEDIUM
-//#define SCENARIO_HIGH
+#define SCENARIO_HIGH
 //#define SCENARIO_BURST
 //#define SCENARIO_JUMBO
 
