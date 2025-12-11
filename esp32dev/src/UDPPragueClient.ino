@@ -14,9 +14,13 @@
 // ECN_SENDER_ENABLE = 0 -> do not request ECN (Not-ECT)
 #define ECN_SENDER_ENABLE 1
 
+// ===== IOT NODE IDENTIFIER =====
+#define IOT_NODE_ID 1
+
+
 // ===== WIFI CONFIG =====
-const char* ssid     = "JEED-TH001";
-const char* password = "Test";
+const char* ssid     = "l4siotmaster";
+const char* password = "masterl4s";
 
 // ===== RECEIVER CONFIG =====
 const char* server_ip   = "3.16.158.161";
@@ -340,6 +344,8 @@ void setup() {
 
     Serial.println("\n======================================");
     Serial.printf("=== ESP32 UDP Prague Client ===\n");
+    Serial.printf("IoT Node ID: %d\n", IOT_NODE_ID);
+    
     Serial.printf("Test Scenario: %s\n", TEST_NAME);
     Serial.printf("Payload Size: %u bytes (header: %u + extra: %u)\n",
                   (unsigned)(sizeof(datamessage_t) + EXTRA_PAYLOAD_SIZE),
@@ -358,6 +364,8 @@ void setup() {
         delay(250);
         Serial.print("*");
     }
+
+    Serial.printf("\nWiFi SSID: %s\n", WiFi.SSID().c_str());
     Serial.printf("\nWiFi RSSI: %d dBm\n", WiFi.RSSI());
     Serial.printf("IP: %s\n\n", WiFi.localIP().toString().c_str());
 
