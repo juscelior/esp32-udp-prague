@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <string>
+#include <deque>
 #include "prague_cc.h"
 #include "json_writer.h"
 
@@ -17,6 +18,8 @@
 #define FRAME_PER_SECOND 60
 #define FRAME_DURATION 10000
 #define PORT 8080
+// Sliding-window length for throughput calculations (in microseconds)
+#define THROUGHPUT_WINDOW_US 200000
 
 // app related stuff collected in this object to avoid obfuscation of the main Prague loop
 struct AppStuff
@@ -55,6 +58,14 @@ struct AppStuff
     bool rt_mode;           // Frame-based sender
     fps_tp rt_fps;          // Frame-based FPS
     uint32_t rt_frameduration;  // Frame-based frame duration
+
+    struct ByteSample {
+        time_tp time;
+        size_tp bytes;
+    };
+
+    std::deque<ByteSample> sent_samples;
+    std::deque<ByteSample> rcvd_samples;
 
     void ExitIf(bool stop, const char* reason)
     {
@@ -182,6 +193,34 @@ struct AppStuff
         if (rt_mode && rt_fps * rt_frameduration > 1000000)
             rt_frameduration = 1000000 / rt_fps;
     }
+    void addSample(std::deque<ByteSample> &samples, time_tp now, size_tp bytes)
+    {
+        samples.push_back({now, bytes});
+        time_tp cutoff = now - THROUGHPUT_WINDOW_US;
+        while (!samples.empty() && samples.front().time < cutoff) {
+            samples.pop_front();
+        }
+    }
+    float calcRateMbps(const std::deque<ByteSample> &samples, time_tp now) const
+    {
+        if (samples.empty())
+            return 0.0f;
+
+        size_tp total_bytes = 0;
+        time_tp start = samples.front().time;
+        for (const auto &s : samples) {
+            total_bytes += s.bytes;
+            if (s.time < start)
+                start = s.time;
+        }
+
+        time_tp dt_us = now - start;
+        if (dt_us <= 0)
+            return 0.0f;
+
+        float dt_sec = dt_us / 1000000.0f;
+        return (float(total_bytes) / dt_sec) * 8e-6f;
+    }
     void printInfo()
     {
         printf("%s %s %s %s on port %d with max packet size %s bytes.\n",
@@ -226,7 +265,10 @@ struct AppStuff
                    C_STR(pacing_rate), pkt_window, pkt_burst, pkt_inflight, pkt_inburst, nextSend - now);
             data_tm = timestamp;
         }
-        if (!quiet) acc_bytes_sent += pkt_size;
+        if (!quiet) {
+            acc_bytes_sent += pkt_size;
+            addSample(sent_samples, now, pkt_size);
+        }
     }
     void LogSendFrameData(time_tp now, time_tp timestamp, time_tp echoed_timestamp, count_tp seqnr, size_tp pkt_size,
                           rate_tp pacing_rate, count_tp frm_window, count_tp frm_size, count_tp pkt_burst,
@@ -240,7 +282,10 @@ struct AppStuff
                    C_STR(pacing_rate), frm_window, frm_size, pkt_burst, frm_inflight, frm_sent, pkt_inburst, nextSend - now);
             data_tm = timestamp;
         }
-        if (!quiet) acc_bytes_sent += pkt_size;
+        if (!quiet) {
+            acc_bytes_sent += pkt_size;
+            addSample(sent_samples, now, pkt_size);
+        }
     }
     void LogRecvACK(time_tp now, time_tp timestamp, time_tp echoed_timestamp, count_tp seqnr, size_tp bytes_received,
                     count_tp pkts_received, count_tp pkts_CE, count_tp pkts_lost, bool error_L4S, rate_tp pacing_rate,
@@ -266,20 +311,7 @@ struct AppStuff
         }
         if (!quiet) {
             acc_bytes_rcvd += bytes_received;
-
-            // Calibrate RTT once to compensate for different clock domains
-            time_tp sample = now - echoed_timestamp;
-            if (!rtt_offset_set) {
-                rtt_offset = sample;
-                rtt_offset_set = true;
-                sample = 0;
-            } else {
-                sample -= rtt_offset;
-                if (sample < 0) sample = 0;
-            }
-
-            acc_rtts += sample;
-            count_rtts++;
+            addSample(rcvd_samples, now, bytes_received);
 
             // Display sender side info
             if (now - rept_tm >= 0)
@@ -311,6 +343,7 @@ struct AppStuff
         }
         if (!quiet) {
             acc_bytes_rcvd += bytes_received;
+            addSample(rcvd_samples, now, bytes_received);
             for (uint16_t i = 0; i < num_rtt; i++) {
                 acc_rtts += pkts_rtt[i];
             }
@@ -325,8 +358,8 @@ struct AppStuff
                      count_tp pkt_window, count_tp pkt_burst, count_tp pkt_inflight, count_tp pkt_inburst,
                      count_tp frm_window = 0, count_tp frm_inflight = 0)
     {
-        float rate_rcvd = 8.0f * acc_bytes_rcvd / (now - rept_tm + rept_int);
-        float rate_sent = 8.0f * acc_bytes_sent / (now - rept_tm + rept_int);
+        float rate_rcvd = calcRateMbps(rcvd_samples, now);
+        float rate_sent = calcRateMbps(sent_samples, now);
         float rate_pacing = 8.0f * pacing_rate / 1000000.0;
         float rtt = (count_rtts > 0) ? 0.001f * acc_rtts / count_rtts : 0.0f;
         float mark_prob = (pkts_received - prev_pkts > 0) ? 100.0f * (pkts_CE - prev_marks) / (pkts_received - prev_pkts) : 0.0f;
@@ -392,21 +425,7 @@ struct AppStuff
         }
         if (!quiet) {
             acc_bytes_rcvd += bytes_received;
-            if (echoed_timestamp && !rfc8888_ack) {
-                // Calibrate RTT once to compensate for clock offset between peers
-                time_tp sample = now - echoed_timestamp;
-                if (!rtt_offset_set) {
-                    rtt_offset = sample;
-                    rtt_offset_set = true;
-                    sample = 0;
-                } else {
-                    sample -= rtt_offset;
-                    if (sample < 0) sample = 0;
-                }
-
-                acc_rtts += sample;
-                count_rtts++;
-            }
+            addSample(rcvd_samples, now, bytes_received);
         }
     }
     void LogSendACK(time_tp now, time_tp timestamp, time_tp echoed_timestamp, count_tp seqnr, size_tp packet_size,
@@ -422,6 +441,7 @@ struct AppStuff
         if (!quiet) {
             // Display receiver side info
             acc_bytes_sent += packet_size;
+            addSample(sent_samples, now, packet_size);
             if (now - rept_tm >= 0)
                 PrintReceiver(now, pkts_received, pkts_CE, pkts_lost);
         }
@@ -437,6 +457,7 @@ struct AppStuff
         if (!quiet) {
             // Display receiver side info
             acc_bytes_sent += packet_size;
+            addSample(sent_samples, now, packet_size);
             for (uint16_t i = 0; i < num_reports; i++) {
                 if ((htons(report[i]) & 0x8000) >> 15) {
                     acc_rtts += ((htons(report[i]) & 0x1FFF) << 10);
@@ -453,8 +474,8 @@ struct AppStuff
     }
     void PrintReceiver(time_tp now, count_tp pkts_received = 0, count_tp pkts_CE = 0, count_tp pkts_lost = 0)
     {
-        float rate_rcvd = 8.0f * acc_bytes_rcvd / (now - rept_tm + rept_int);
-        float rate_sent = 8.0f * acc_bytes_sent / (now - rept_tm + rept_int);
+        float rate_rcvd = calcRateMbps(rcvd_samples, now);
+        float rate_sent = calcRateMbps(sent_samples, now);
         float rtt = (count_rtts > 0) ? 0.001f * acc_rtts / count_rtts : 0.0f;
         float mark_prob = (!rfc8888_ack) ?
                           ((pkts_received - prev_pkts > 0) ? 100.0f * (pkts_CE - prev_marks) / (pkts_received - prev_pkts) : 0.0f) :
