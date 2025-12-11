@@ -345,8 +345,9 @@ void setup() {
     Serial.println("\n======================================");
     Serial.printf("=== ESP32 UDP Prague Client ===\n");
     Serial.printf("IoT Node ID: %d\n", IOT_NODE_ID);
-    
+
     Serial.printf("Test Scenario: %s\n", TEST_NAME);
+    Serial.printf("ECN: %d\n", ECN_SENDER_ENABLE);
     Serial.printf("Payload Size: %u bytes (header: %u + extra: %u)\n",
                   (unsigned)(sizeof(datamessage_t) + EXTRA_PAYLOAD_SIZE),
                   (unsigned)sizeof(datamessage_t),
