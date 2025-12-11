@@ -528,7 +528,7 @@ bool PragueCC::ACKReceived(    // call this when an ACK is received from peer. R
     m_packets_sent = packets_sent;         // can NOT go down
     if (error_L4S) m_error_L4S = true;     // can NOT reset
     inflight = packets_sent - m_packets_received - m_packets_lost;
-    if (inflight < 0) //impedir inflight negativo
+    if (inflight < 0) //avoid negative inflight
         inflight = 0;
     return true;
 }

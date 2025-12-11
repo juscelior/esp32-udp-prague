@@ -43,6 +43,10 @@ struct AppStuff
     rate_tp acc_bytes_rcvd; // accumulated bytes received
     rate_tp acc_rtts;       // accumulated rtts to calculate the average
     count_tp count_rtts;    // count the RTT reports
+
+    // Offset calibration for RTT when mixing different clock domains
+    time_tp rtt_offset;
+    bool    rtt_offset_set;
     count_tp prev_pkts;     // prev packets received
     count_tp prev_marks;    // prev marks received
     count_tp prev_losts;    // prev losts received
@@ -81,7 +85,9 @@ struct AppStuff
         sender_role(sender), verbose(false), quiet(false), rcv_addr("0.0.0.0"), rcv_port(PORT), connect(false),
         json_output(false), max_pkt(PRAGUE_INITMTU), max_rate(PRAGUE_MAXRATE), data_tm(1), ack_tm(1),
         rept_tm(REPT_PERIOD), rept_int(REPT_PERIOD), rept_name(""),
-        acc_bytes_sent(0), acc_bytes_rcvd(0), acc_rtts(0), count_rtts(0), prev_pkts(0), prev_marks(0), prev_losts(0),
+        acc_bytes_sent(0), acc_bytes_rcvd(0), acc_rtts(0), count_rtts(0),
+        rtt_offset(0), rtt_offset_set(false),
+        prev_pkts(0), prev_marks(0), prev_losts(0),
         rfc8888_ack(false), rfc8888_ackperiod(RFC8888_ACKPERIOD),
         rt_mode(false), rt_fps(FRAME_PER_SECOND), rt_frameduration(FRAME_DURATION)
     {
@@ -260,8 +266,21 @@ struct AppStuff
         }
         if (!quiet) {
             acc_bytes_rcvd += bytes_received;
-            acc_rtts += (now - echoed_timestamp);
+
+            // Calibrate RTT once to compensate for different clock domains
+            time_tp sample = now - echoed_timestamp;
+            if (!rtt_offset_set) {
+                rtt_offset = sample;
+                rtt_offset_set = true;
+                sample = 0;
+            } else {
+                sample -= rtt_offset;
+                if (sample < 0) sample = 0;
+            }
+
+            acc_rtts += sample;
             count_rtts++;
+
             // Display sender side info
             if (now - rept_tm >= 0)
                 PrintSender(now, pkts_received, pkts_CE, pkts_lost, pacing_rate, pkt_window, pkt_burst,
@@ -374,7 +393,18 @@ struct AppStuff
         if (!quiet) {
             acc_bytes_rcvd += bytes_received;
             if (echoed_timestamp && !rfc8888_ack) {
-                acc_rtts += (now - echoed_timestamp);
+                // Calibrate RTT once to compensate for clock offset between peers
+                time_tp sample = now - echoed_timestamp;
+                if (!rtt_offset_set) {
+                    rtt_offset = sample;
+                    rtt_offset_set = true;
+                    sample = 0;
+                } else {
+                    sample -= rtt_offset;
+                    if (sample < 0) sample = 0;
+                }
+
+                acc_rtts += sample;
                 count_rtts++;
             }
         }
