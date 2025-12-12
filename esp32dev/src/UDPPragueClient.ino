@@ -288,8 +288,9 @@ void receiveAcks() {
     // ===== STRUCTURED LOG FOR ANALYSIS (CSTATS) =====
     unsigned long ms_since_start = millis() - test_start_ms;
     Serial.printf(
-        "CSTATS;%lu;%ld;%ld;%ld;%ld;%ld;%ld;%llu\n",
+        "CSTATS;%lu;%ld;%ld;%ld;%ld;%ld;%ld;%ld;%llu\n",
         ms_since_start,
+        (long)packets_sent,
         (long)ack.packets_received,
         (long)inflight,
         (long)rtt,

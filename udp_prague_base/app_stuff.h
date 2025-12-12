@@ -13,7 +13,7 @@
 
 // to avoid int64 printf incompatibility between platforms:
 #define C_STR(i) std::to_string(i).c_str()
-#define REPT_PERIOD 1000000
+#define REPT_PERIOD 200000
 #define RFC8888_ACKPERIOD 25000
 #define FRAME_PER_SECOND 60
 #define FRAME_DURATION 10000
@@ -207,14 +207,18 @@ struct AppStuff
             return 0.0f;
 
         size_tp total_bytes = 0;
+        time_tp first_time = samples.front().time;
+        time_tp last_time = samples.back().time;
+        
         for (const auto &s : samples) {
             total_bytes += s.bytes;
         }
 
-        // Use fixed THROUGHPUT_WINDOW for rate calculation (not time since first sample)
-        time_tp dt_us = THROUGHPUT_WINDOW_US;
+        // Calculate actual time span of data in this bucket
+        time_tp dt_us = last_time - first_time;
+        // If all packets arrived at same time, use minimum 1ms to avoid division by zero
         if (dt_us <= 0)
-            return 0.0f;
+            dt_us = 1000;
 
         float dt_sec = dt_us / 1000000.0f;
         return (float(total_bytes) / dt_sec) * 8e-6f;
@@ -513,6 +517,9 @@ struct AppStuff
             }
         }
         rept_tm = now + rept_int;
+        // Clear sample buffers to create non-overlapping 200ms buckets
+        rcvd_samples.clear();
+        sent_samples.clear();
         acc_bytes_rcvd = 0;
         acc_bytes_sent = 0;
         acc_rtts = 0;
