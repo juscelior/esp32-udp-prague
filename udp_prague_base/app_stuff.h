@@ -201,7 +201,7 @@ struct AppStuff
             samples.pop_front();
         }
     }
-    float calcRateMbps(const std::deque<ByteSample> &samples, time_tp now) const
+    float calcRateBytes(const std::deque<ByteSample> &samples, time_tp now) const
     {
         if (samples.empty())
             return 0.0f;
@@ -221,7 +221,7 @@ struct AppStuff
             dt_us = 1000;
 
         float dt_sec = dt_us / 1000000.0f;
-        return (float(total_bytes) / dt_sec) * 8e-6f;
+        return (float(total_bytes) / dt_sec);
     }
     void printInfo()
     {
@@ -360,8 +360,8 @@ struct AppStuff
                      count_tp pkt_window, count_tp pkt_burst, count_tp pkt_inflight, count_tp pkt_inburst,
                      count_tp frm_window = 0, count_tp frm_inflight = 0)
     {
-        float rate_rcvd = calcRateMbps(rcvd_samples, now);
-        float rate_sent = calcRateMbps(sent_samples, now);
+        float rate_rcvd = calcRateBytes(rcvd_samples, now);
+        float rate_sent = calcRateBytes(sent_samples, now);
         float rate_pacing = 8.0f * pacing_rate / 1000000.0;
         float rtt = (count_rtts > 0) ? 0.001f * acc_rtts / count_rtts : 0.0f;
         float mark_prob = (pkts_received - prev_pkts > 0) ? 100.0f * (pkts_CE - prev_marks) / (pkts_received - prev_pkts) : 0.0f;
@@ -476,8 +476,8 @@ struct AppStuff
     }
     void PrintReceiver(time_tp now, count_tp pkts_received = 0, count_tp pkts_CE = 0, count_tp pkts_lost = 0)
     {
-        float rate_rcvd = calcRateMbps(rcvd_samples, now);
-        float rate_sent = calcRateMbps(sent_samples, now);
+        float rate_rcvd = calcRateBytes(rcvd_samples, now);
+        float rate_sent = calcRateBytes(sent_samples, now);
         float rtt = (count_rtts > 0) ? 0.001f * acc_rtts / count_rtts : 0.0f;
         float mark_prob = (!rfc8888_ack) ?
                           ((pkts_received - prev_pkts > 0) ? 100.0f * (pkts_CE - prev_marks) / (pkts_received - prev_pkts) : 0.0f) :
@@ -488,13 +488,13 @@ struct AppStuff
         if (!json_output) {
             if (!rfc8888_ack) {
                 // Sem RFC8888 não temos RTT confiável no servidor; exibir RTT: N/A
-                printf("[RECVER]: %.2f sec, Rcvd: %.3f Mbps, Sent: %.3f Mbps, RTT: N/A, Mark: %.2f%%(%d/%d), Lost: %.2f%%(%d/%d)\n",
+                printf("[RECVER]: %.2f sec, Rcvd: %.0f B/s, Sent: %.0f B/s, RTT: N/A, Mark: %.2f%%(%d/%d), Lost: %.2f%%(%d/%d)\n",
                        now / 1000000.0f, rate_rcvd, rate_sent,
                        mark_prob, pkts_CE - prev_marks, pkts_received - prev_pkts,
                        loss_prob, pkts_lost - prev_losts, pkts_received - prev_pkts);
             } else {
                 // Modo RFC8888: ATO (Average Time Offset) com RTT calculado a partir dos reports
-                printf("[RECVER]: %.2f sec, Rcvd: %.3f Mbps, Sent: %.3f Mbps, ATO: %.3f ms, Mark: %.2f%%(%d/%d), Lost: %.2f%%(%d/%d)\n",
+                printf("[RECVER]: %.2f sec, Rcvd: %.0f B/s, Sent: %.0f B/s, ATO: %.3f ms, Mark: %.2f%%(%d/%d), Lost: %.2f%%(%d/%d)\n",
                        now / 1000000.0f, rate_rcvd, rate_sent, rtt,
                        mark_prob, prev_marks, prev_pkts,
                        loss_prob, prev_losts, prev_pkts);
