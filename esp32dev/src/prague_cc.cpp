@@ -158,7 +158,7 @@ time_tp PragueCC::Now()
     if (now >= m_start_ref) {
         elapsed = now - m_start_ref;
     } else {
-        // wrap de 32 bits
+        // 32-bit wraparound
         elapsed = (0xFFFFFFFFu - m_start_ref) + 1u + now;
     }
 
@@ -278,10 +278,10 @@ bool PragueCC::PacketReceived(         // call this when a packet is received fr
         return false;
     time_tp ts = Now();
     //m_ts_remote = ts - timestamp;  // freeze the remote timestamp
-    m_ts_remote = timestamp; //timestamp remoto não pode ser (ts - timestamp)
+    m_ts_remote = timestamp; // remote timestamp must not be (ts - timestamp)
 
     m_rtt = ts - echoed_timestamp; // calculate the new rtt sample
-    if (m_rtt <= 0)   // proteje wrap ou erro numérico
+    if (m_rtt <= 0)   // protect against wraparound or numerical error
         m_rtt = 1;
 
     m_rtt_min = (m_rtt_min > m_rtt) ? m_rtt : m_rtt_min; // keep track of the minimum rtt

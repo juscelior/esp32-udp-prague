@@ -12,7 +12,7 @@
 // ===== ECN SENDER MARKING =====
 // ECN_SENDER_ENABLE = 1 -> mark packets as ECN-capable (ECT(1))
 // ECN_SENDER_ENABLE = 0 -> do not request ECN (Not-ECT)
-#define ECN_SENDER_ENABLE 1
+#define ECN_SENDER_ENABLE 0
 
 // ===== IOT NODE IDENTIFIER =====
 #define IOT_NODE_ID 1
@@ -63,12 +63,21 @@ const int   server_port = 5005;
     #define TEST_DURATION_SEC 60
 #endif
 
-// ===== LIMITES REALISTAS PARA ESP32 =====
-static const int MAX_WINDOW_ESP32 = 12;    // máximo inflight que o WiFi suporta
-static const int MAX_BURST_ESP32  = 5;     // burst seguro
+// ===== GATEWAY NETWORK CONFIGURATION =====
+// Update these per experiment to document the gateway/bottleneck settings.
+// Example values: "prague", "cubic", "bbr" for CC, and
+// "dualpi2", "fq_codel", "pfifo" for qdisc.
+const char* GW_CC_ALGO = "reno";      // gateway congestion control algorithm
+const char* GW_QDISC   = "fq_codel";     // gateway qdisc configuration
 
-// ===== BURST ADAPTATIVO =====
-static count_tp MAX_SAFE_BURST = 3;        // inicial seguro
+// ===== REALISTIC LIMITS FOR ESP32 =====
+// If MAX_WINDOW_ESP32 > 0: limit the maximum number of inflight packets on the ESP32.
+// If MAX_WINDOW_ESP32 == -1: do not apply a local window limit; use only the Prague window.
+static const int MAX_WINDOW_ESP32 = -1;    // maximum inflight packets that WiFi should handle (use -1 for "no limit")
+static const int MAX_BURST_ESP32  = 5;     // safe burst size
+
+// ===== ADAPTIVE BURST =====
+static count_tp MAX_SAFE_BURST = 3;        // safe initial value
 static uint32_t burstSuccessCount = 0;
 
 // ===== SOCKET & ADDRESS =====
@@ -141,7 +150,7 @@ struct ackmessage_t {
 
 #pragma pack(pop)
 
-// ===== BUFFER ESTÁTICO =====
+// ===== STATIC BUFFER =====
 static uint8_t tx_buffer[sizeof(datamessage_t) + EXTRA_PAYLOAD_SIZE];
 
 // ===== PRINT DEVICE INFO =====
@@ -202,9 +211,11 @@ void receiveAcks() {
     }
 
     // ===== RTT & JITTER (client-side) =====
-    time_tp rtt = ack.echoed_timestamp - ack.timestamp;
+    // RTT = current time - echoed timestamp (timestamp that we originally sent)
+    time_tp now = micros();
+    time_tp rtt = now - ack.echoed_timestamp;
     if (rtt < 0) {
-        // defensivo: se vier negativo por wrap, ignore esta amostra
+        // Defensive: if it becomes negative due to wrap, ignore this sample
         rtt = 0;
     }
 
@@ -218,7 +229,7 @@ void receiveAcks() {
     }
     last_rtt = rtt;
 
-    // stats agregadas
+    // aggregated stats
     if (rtt_count == 0) {
         rtt_min = rtt_max = rtt;
     } else {
@@ -243,16 +254,20 @@ void receiveAcks() {
 
     prague.GetCCInfo(pacing_rate, packet_window, packet_burst, packet_size);
 
-    // Limit window to what the ESP32 Wi‑Fi can handle
-    packet_window = min(packet_window, (count_tp)MAX_WINDOW_ESP32);
+    // Limit window to what the ESP32 Wi‑Fi can handle (if enabled)
+    if (MAX_WINDOW_ESP32 > 0) {
+        packet_window = min(packet_window, (count_tp)MAX_WINDOW_ESP32);
+    }
 #else
     // Baseline mode: keep a fixed window/burst, do not adapt
-    packet_window = MAX_WINDOW_ESP32;
+    if (MAX_WINDOW_ESP32 > 0) {
+        packet_window = MAX_WINDOW_ESP32;
+    }
     packet_burst  = MAX_BURST_ESP32;
     // pacing_rate/packet_size are taken from the initial PragueCC config in setup()
 #endif
 
-    // ===== RECALCULAR INFLIGHT REAL =====
+    // ===== RECALCULATE ACTUAL INFLIGHT =====
     if (ack.packets_received <= packets_sent) {
         inflight = packets_sent - ack.packets_received;
     } else {
@@ -270,7 +285,7 @@ void receiveAcks() {
         (int)ack.error_L4S
     );
 
-    // ===== LOG ESTRUTURADO PARA ANÁLISE (CSTATS) =====
+    // ===== STRUCTURED LOG FOR ANALYSIS (CSTATS) =====
     unsigned long ms_since_start = millis() - test_start_ms;
     Serial.printf(
         "CSTATS;%lu;%ld;%ld;%ld;%ld;%ld;%ld;%llu\n",
@@ -354,6 +369,8 @@ void setup() {
                   EXTRA_PAYLOAD_SIZE);
     Serial.printf("Initial Burst Limit: %ld packets\n", (long)MAX_SAFE_BURST);
     Serial.printf("Duration: %u seconds\n", TEST_DURATION_SEC);
+    Serial.printf("Gateway CC Algorithm: %s\n", GW_CC_ALGO);
+    Serial.printf("Gateway Qdisc: %s\n", GW_QDISC);
     Serial.println("======================================\n");
 
     printDeviceInfo();
@@ -415,11 +432,11 @@ void loop() {
     time_tp burst_start = 0;
     count_tp burst_count = 0;
 
-    // ===== BURST LIMITADO =====
+    // ===== LIMITED BURST =====
     count_tp allowed_burst = min(packet_burst, MAX_SAFE_BURST);
 
-    // ===== JANELA LIMITADA =====
-    if (packet_window > MAX_WINDOW_ESP32)
+    // ===== LIMITED WINDOW =====
+    if (MAX_WINDOW_ESP32 > 0 && packet_window > MAX_WINDOW_ESP32)
         packet_window = MAX_WINDOW_ESP32;
 
     while (inflight < packet_window &&
@@ -442,14 +459,14 @@ void loop() {
     }
 
     if (burst_count > 0) {
-        // Purista: usar sempre o pacing_rate do Prague;
-        // só cai para PRAGUE_MINRATE se for realmente inválido (<= 0).
+        // Purist approach: always use Prague's pacing_rate;
+        // fall back to PRAGUE_MINRATE only if it is really invalid (<= 0).
         rate_tp rate = pacing_rate > 0 ? pacing_rate : PRAGUE_MINRATE;
 
         time_tp burst_duration =
             (time_tp)((packet_size * (size_tp)burst_count * 1000000ULL) / rate);
 
-        // Apenas logar se algo parecer fora do normal
+        // Only log if something looks abnormal
         if (burst_duration <= 0) {
             Serial.printf("[WARN] burst_duration=%ld us (rate=%llu, burst=%ld, pkt=%llu)\n",
                           (long)burst_duration,

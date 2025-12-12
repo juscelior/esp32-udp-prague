@@ -207,14 +207,12 @@ struct AppStuff
             return 0.0f;
 
         size_tp total_bytes = 0;
-        time_tp start = samples.front().time;
         for (const auto &s : samples) {
             total_bytes += s.bytes;
-            if (s.time < start)
-                start = s.time;
         }
 
-        time_tp dt_us = now - start;
+        // Use fixed THROUGHPUT_WINDOW for rate calculation (not time since first sample)
+        time_tp dt_us = THROUGHPUT_WINDOW_US;
         if (dt_us <= 0)
             return 0.0f;
 
