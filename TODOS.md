@@ -2,6 +2,16 @@
 
 > Generated from full code audit + upstream comparison + academic methodology assessment.
 > Priority: P0 = Critical (blocks correctness), P1 = High (affects results), P2 = Medium (quality).
+>
+> **Progress: 16/21 completed (76%)** — Last updated: 2026-03-23
+>
+> | Phase | Done | Total | Status |
+> |-------|------|-------|--------|
+> | 1 — Critical Bug Fixes (P0) | 3 | 3 | **Complete** |
+> | 2 — Upstream Divergences (P1) | 4 | 4 | **Complete** |
+> | 3 — Statistical Rigor (P1) | 5 | 5 | **Complete** |
+> | 4 — Notebook Updates (P1) | 4 | 4 | **Complete** |
+> | 5 — Lab / Methodology (P2) | 0 | 5 | Pending (requires lab execution) |
 
 ---
 
@@ -33,10 +43,11 @@
 
 ## Phase 2: Upstream Divergences (P1)
 
-### 2.1 — [ ] Port upstream UDPSocket rewrite
+### 2.1 — [x] Port upstream UDPSocket rewrite
 - **Files:** `udp_prague_base/udpsocket.h` (current: monolithic header, no error handling)
 - **Upstream:** Split into `udpsocket.h` + `udpsocket.cpp` with `UDPSocket` class, `Endpoint` struct, IPv6 support, `std::system_error` exceptions, proper RAII.
 - **Priority:** P1 — Current server may silently fail (e.g., bind errors, ECN cmsg failures). Causes the "server not showing logs on new machine" issue.
+- **Status:** Done — `udp_prague_base/` atualizado com upstream L4STeam/udp_prague: udpsocket.h (declarações) + udpsocket.cpp (implementação com Endpoint, SocketHandle, error handling, IPv6, RAII).
 
 ### 2.2 — [x] Add virtual destructor to PragueCC
 - **Upstream** added `virtual ~PragueCC() = default;` to the header.
@@ -48,9 +59,10 @@
 - **Decision needed:** Keep Cubic for comparison experiments, or remove to stay in sync?
 - **Status:** Done — Cubic removido: enum `cca_cubic`, variáveis de estado (`m_cubic_*`, `m_rtt_min`), helpers (`fls`, `fls64`, `CubicRoot`), constantes (`BETA`, `C_SCALED`, etc.) e branches de código. Alinhado com upstream.
 
-### 2.4 — [ ] Port `pkt_format.h` updates
+### 2.4 — [x] Port `pkt_format.h` updates
 - Upstream added `framemessage_t`, `rfc8888ack_t`, `BULK_DATA_TYPE = 1`, `PKT_ACK_TYPE = 17`.
 - ESP32 uses inline `#pragma pack` structs. Should align naming/types.
+- **Status:** Done — `pkt_format.h` já estava idêntico ao upstream. Base atualizada com versão upstream atual. ESP32 mantém structs inline no `.ino` (intencional para ambiente Arduino).
 
 ---
 
