@@ -12,18 +12,24 @@
 // ===== ECN SENDER MARKING =====
 // ECN_SENDER_ENABLE = 1 -> mark packets as ECN-capable (ECT(1))
 // ECN_SENDER_ENABLE = 0 -> do not request ECN (Not-ECT)
-#define ECN_SENDER_ENABLE 0
+#define ECN_SENDER_ENABLE 1
 
 // ===== IOT NODE IDENTIFIER =====
 #define IOT_NODE_ID 1
 
+// ===== GATEWAY NETWORK CONFIGURATION =====
+// Update these per experiment to document the gateway/bottleneck settings.
+// Example values: "prague", "cubic", "reno" for CC, and
+// "dualpi2", "fq_codel" for qdisc.
+const char* GW_CC_ALGO = "prague";      // gateway congestion control algorithm
+const char* GW_QDISC   = "dualpi2";     // gateway qdisc configuration
 
 // ===== WIFI CONFIG =====
 const char* ssid     = "l4siotmaster";
 const char* password = "masterl4s";
 
 // ===== RECEIVER CONFIG =====
-const char* server_ip   = "3.16.158.161";
+const char* server_ip   = "20.62.8.146";
 const int   server_port = 5005;
 
 // ===== TEST SCENARIO CONFIGURATION =====
@@ -44,7 +50,7 @@ const int   server_port = 5005;
 #elif defined(SCENARIO_HIGH)
     #define TEST_NAME "High Load"
     #define EXTRA_PAYLOAD_SIZE 1383
-    #define TEST_DURATION_SEC 180
+    #define TEST_DURATION_SEC 600
 #elif defined(SCENARIO_BURST)
     #define TEST_NAME "Burst Mode"
     #define EXTRA_PAYLOAD_SIZE 1183
@@ -62,13 +68,6 @@ const int   server_port = 5005;
     #define EXTRA_PAYLOAD_SIZE 0
     #define TEST_DURATION_SEC 60
 #endif
-
-// ===== GATEWAY NETWORK CONFIGURATION =====
-// Update these per experiment to document the gateway/bottleneck settings.
-// Example values: "prague", "cubic", "bbr" for CC, and
-// "dualpi2", "fq_codel", "pfifo" for qdisc.
-const char* GW_CC_ALGO = "reno";      // gateway congestion control algorithm
-const char* GW_QDISC   = "fq_codel";     // gateway qdisc configuration
 
 // ===== REALISTIC LIMITS FOR ESP32 =====
 // If MAX_WINDOW_ESP32 > 0: limit the maximum number of inflight packets on the ESP32.
@@ -99,7 +98,6 @@ size_tp  packet_size;
 // ===== TEST METRICS =====
 unsigned long test_start_ms = 0;
 unsigned long test_bytes_sent = 0;
-unsigned long test_packets_sent = 0;
 
 unsigned long error_count = 0;     // total de erros sendto()
 unsigned long enobufs_count = 0;   // especificamente ENOBUFS
@@ -325,7 +323,6 @@ void sendDataPacket() {
         inflight++;
         seqnr++;
         packets_sent++;
-        test_packets_sent++;
         test_bytes_sent += total_size;
 
         burstSuccessCount++;
@@ -419,7 +416,7 @@ void loop() {
             " - ENOBUFS: %lu\n"
             " - Other Errors: %lu\n",
             test_bytes_sent,
-            test_packets_sent,
+            (unsigned long)packets_sent,
             error_count,
             enobufs_count,
             other_errors
