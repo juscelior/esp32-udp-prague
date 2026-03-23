@@ -277,8 +277,7 @@ bool PragueCC::PacketReceived(         // call this when a packet is received fr
     if ((m_cc_state != cs_init) && (m_r_prev_ts - timestamp > 0)) // is this an older timestamp?
         return false;
     time_tp ts = Now();
-    //m_ts_remote = ts - timestamp;  // freeze the remote timestamp
-    m_ts_remote = timestamp; // remote timestamp must not be (ts - timestamp)
+    m_ts_remote = ts - timestamp;  // freeze the remote timestamp (clock offset)
 
     m_rtt = ts - echoed_timestamp; // calculate the new rtt sample
     if (m_rtt <= 0)   // protect against wraparound or numerical error

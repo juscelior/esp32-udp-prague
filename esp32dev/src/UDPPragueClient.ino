@@ -209,8 +209,8 @@ void receiveAcks() {
     }
 
     // ===== RTT & JITTER (client-side) =====
-    // RTT = current time - echoed timestamp (timestamp that we originally sent)
-    time_tp now = micros();
+    // RTT = current time - echoed timestamp (offset-adjusted by server)
+    time_tp now = prague.Now();
     time_tp rtt = now - ack.echoed_timestamp;
     if (rtt < 0) {
         // Defensive: if it becomes negative due to wrap, ignore this sample
@@ -309,6 +309,10 @@ void sendDataPacket() {
     prague.GetTimeInfo(msg->timestamp, msg->echoed_timestamp, snd_ecn);
     msg->seq_nr = seqnr;
     msg->hton();
+
+    // Apply ECN marking from Prague CC (may toggle ECT(1) ↔ Not-ECT on error_L4S)
+    int tos_val = (int)snd_ecn;
+    setsockopt(sockfd, IPPROTO_IP, IP_TOS, &tos_val, sizeof(tos_val));
 
     int sent = sendto(
         sockfd,
