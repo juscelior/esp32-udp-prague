@@ -3,15 +3,39 @@
 > Generated from full code audit + upstream comparison + academic methodology assessment.
 > Priority: P0 = Critical (blocks correctness), P1 = High (affects results), P2 = Medium (quality).
 >
-> **Progress: 16/21 completed (76%)** — Last updated: 2026-03-23
+> **Progress: 17/21 completed (81%)** — Last updated: 2026-03-24
 >
+### Como continuar com os testes (workflow manual):
+
+1. **Configurar e fazer upload do firmware para o ESP32**
+	 - Use o script interativo para escolher o cenário e flashear:
+		 ```bash
+		 ./scripts/configure_and_flash_only.sh
+		 ```
+	 - Ou rode direto para um cenário específico:
+		 ```bash
+		 ./scripts/configure_and_flash_only.sh t01-ecn-sender-ect1-prague-fqcodel-ecn0
+		 ```
+
+2. **Monitorar a saída serial do ESP32**
+	 - Para apenas visualizar (preview, sem salvar):
+		 ```bash
+		 ./scripts/monitor_esp32_serial.sh t01-ecn-sender-ect1-prague-fqcodel-ecn0
+		 ```
+	 - Para salvar a saída na pasta do cenário, por exemplo como esp_client_2.log:
+		 ```bash
+		 ./scripts/monitor_esp32_serial.sh t01-ecn-sender-ect1-prague-fqcodel-ecn0 2
+		 ```
+
+---
+
 > | Phase | Done | Total | Status |
 > |-------|------|-------|--------|
 > | 1 — Critical Bug Fixes (P0) | 3 | 3 | **Complete** |
 > | 2 — Upstream Divergences (P1) | 4 | 4 | **Complete** |
 > | 3 — Statistical Rigor (P1) | 5 | 5 | **Complete** |
 > | 4 — Notebook Updates (P1) | 4 | 4 | **Complete** |
-> | 5 — Lab / Methodology (P2) | 0 | 5 | Pending (requires lab execution) |
+> | 5 — Lab / Methodology (P2) | 1 | 5 | Script pronto, falta execução no lab |
 
 ---
 
@@ -126,9 +150,10 @@
 - Current: 1 run per scenario → no statistical power.
 - Target: ≥ 3 runs per scenario (5 ideal for publication).
 
-### 5.3 — [ ] Automate experiment execution
+### 5.3 — [x] Automate experiment execution
 - Script to iterate over all 36 scenarios with proper naming.
 - Include cooldown period between experiments.
+- **Status:** Done — `scripts/run_experiments.sh` orquestra Mac → Raspberry Pi (gateway via SSH+tc/sysctl) → Azure (receiver via SSH) → ESP32 (flash via PlatformIO + serial capture). Suporta `--scenario`, `--all`, `--list`, `--status`, e `REPETITIONS=N`.
 
 ### 5.4 — [ ] Validate struct alignment end-to-end
 - Ensure `datamessage_t` (13 bytes) and `ackmessage_t` (26 bytes) match exactly between ESP32 and server.

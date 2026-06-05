@@ -90,3 +90,6 @@ $RECYCLE.BIN/
 .~*
 
 /ignore
+.claude
+.claude/
+.claude/*
