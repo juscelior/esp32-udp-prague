@@ -7,7 +7,7 @@
 // ===== CONGESTION CONTROL MODE =====
 // Default: full Prague CC (adaptive). Uncomment for a fixed baseline mode
 // that does not adapt window/rate based on Prague feedback.
-// #define CC_MODE_BASELINE
+#define CC_MODE_BASELINE
 
 // ===== ECN SENDER MARKING =====
 // ECN_SENDER_ENABLE = 1 -> mark packets as ECN-capable (ECT(1))
@@ -21,8 +21,8 @@
 // Update these per experiment to document the gateway/bottleneck settings.
 // Example values: "prague", "cubic", "reno" for CC, and
 // "dualpi2", "fq_codel" for qdisc.
-const char* GW_CC_ALGO = "prague";
-const char* GW_QDISC   = "dualpi2";
+const char* GW_CC_ALGO = "cubic";
+const char* GW_QDISC   = "fq_codel";
 
 // ===== WIFI CONFIG =====
 const char* ssid     = "l4siotmaster";
@@ -50,7 +50,7 @@ const int   server_port = 5005;
 #elif defined(SCENARIO_HIGH)
     #define TEST_NAME "High Load"
     #define EXTRA_PAYLOAD_SIZE 1383
-    #define TEST_DURATION_SEC 600
+    #define TEST_DURATION_SEC 300
 #elif defined(SCENARIO_BURST)
     #define TEST_NAME "Burst Mode"
     #define EXTRA_PAYLOAD_SIZE 1183
@@ -72,7 +72,7 @@ const int   server_port = 5005;
 // ===== REALISTIC LIMITS FOR ESP32 =====
 // If MAX_WINDOW_ESP32 > 0: limit the maximum number of inflight packets on the ESP32.
 // If MAX_WINDOW_ESP32 == -1: do not apply a local window limit; use only the Prague window.
-static const int MAX_WINDOW_ESP32 = -1;    // maximum inflight packets that WiFi should handle (use -1 for "no limit")
+static const int MAX_WINDOW_ESP32 = 10;
 static const int MAX_BURST_ESP32  = 5;     // safe burst size
 
 // ===== ADAPTIVE BURST =====
@@ -102,6 +102,15 @@ unsigned long test_bytes_sent = 0;
 unsigned long error_count = 0;     // total de erros sendto()
 unsigned long enobufs_count = 0;   // especificamente ENOBUFS
 unsigned long other_errors = 0;    // outros erros sendto()
+
+// ===== ACK-SILENCE WATCHDOG (FIX #2) =====
+// Se nenhum ACK valido chegar dentro de ACK_TIMEOUT_MS e o envio estiver
+// bloqueado (inflight >= window), assume os pacotes em voo como perdidos,
+// reseta o Prague CC (mesma estrategia do cliente Linux de referencia) e
+// envia um pacote-sonda para reativar o relogio de ACKs.
+unsigned long last_ack_ms = 0;
+const unsigned long ACK_TIMEOUT_MS = 2000;   // > pior RTT observado (~330 ms)
+unsigned long watchdog_count = 0;            // quantas vezes o watchdog atuou
 
 // ===== CLIENT RTT/JITTER METRICS =====
 time_tp last_rtt = 0;
@@ -208,6 +217,9 @@ void receiveAcks() {
         return;
     }
 
+    // ===== FIX #2: registra o instante do ultimo ACK valido (watchdog) =====
+    last_ack_ms = millis();
+
     // ===== RTT & JITTER (client-side) =====
     // RTT = current time - echoed timestamp (offset-adjusted by server)
     time_tp now = prague.Now();
@@ -265,9 +277,13 @@ void receiveAcks() {
     // pacing_rate/packet_size are taken from the initial PragueCC config in setup()
 #endif
 
-    // ===== RECALCULATE ACTUAL INFLIGHT =====
-    if (ack.packets_received <= packets_sent) {
-        inflight = packets_sent - ack.packets_received;
+    // ===== RECALCULATE ACTUAL INFLIGHT (FIX #1) =====
+    // Pacotes perdidos nunca serao "recebidos": sem descontar packets_lost,
+    // cada perda infla o inflight permanentemente e pode causar deadlock
+    // (inflight >= window com a rede vazia).
+    count_tp accounted = ack.packets_received + ack.packets_lost;
+    if (accounted <= packets_sent) {
+        inflight = packets_sent - accounted;
     } else {
         inflight = 0;
     }
@@ -307,6 +323,11 @@ void sendDataPacket() {
     ecn_tp snd_ecn;
 
     prague.GetTimeInfo(msg->timestamp, msg->echoed_timestamp, snd_ecn);
+
+    #if !ECN_SENDER_ENABLE
+        snd_ecn = ecn_not_ect;   // cenarios Not-ECT: nao sobrescreve com ECT(1)
+    #endif
+
     msg->seq_nr = seqnr;
     msg->hton();
 
@@ -405,6 +426,7 @@ void setup() {
 
     nextSend = prague.Now() + 2000;
     test_start_ms = millis();
+    last_ack_ms = millis();   // FIX #2: inicializa o watchdog
 }
 
 // ===== MAIN LOOP =====
@@ -418,17 +440,35 @@ void loop() {
             "Packets Sent: %lu\n"
             "Total Errors: %lu\n"
             " - ENOBUFS: %lu\n"
-            " - Other Errors: %lu\n",
+            " - Other Errors: %lu\n"
+            "Watchdog Resets: %lu\n",
             test_bytes_sent,
             (unsigned long)packets_sent,
             error_count,
             enobufs_count,
-            other_errors
+            other_errors,
+            watchdog_count
         );
         while (true) delay(1000);
     }
 
     receiveAcks();
+
+    // ===== FIX #2: ACK-SILENCE WATCHDOG =====
+    // Envio bloqueado ha mais de ACK_TIMEOUT_MS sem nenhum ACK valido:
+    // assume os pacotes em voo como perdidos e reseta o CC (probe).
+    if (inflight >= packet_window && (millis() - last_ack_ms) > ACK_TIMEOUT_MS) {
+        watchdog_count++;
+        Serial.printf("[WATCHDOG] ACK silence %lums: assuming %ld inflight lost, resetting CC\n",
+                      millis() - last_ack_ms, (long)inflight);
+        prague.ResetCCInfo();      // mesma estrategia do cliente Linux de referencia
+        prague.GetCCInfo(pacing_rate, packet_window, packet_burst, packet_size);
+        if (MAX_WINDOW_ESP32 > 0 && packet_window > MAX_WINDOW_ESP32)
+            packet_window = MAX_WINDOW_ESP32;
+        inflight = 0;
+        nextSend = prague.Now();   // libera envio imediato (pacote-sonda)
+        last_ack_ms = millis();    // evita disparo repetido antes do probe
+    }
 
     time_tp now = prague.Now();
     time_tp burst_start = 0;
