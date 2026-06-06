@@ -21,8 +21,8 @@
 // Update these per experiment to document the gateway/bottleneck settings.
 // Example values: "prague", "cubic", "reno" for CC, and
 // "dualpi2", "fq_codel" for qdisc.
-const char* GW_CC_ALGO = "cubic";
-const char* GW_QDISC   = "fq_codel";
+const char* GW_CC_ALGO = "reno";
+const char* GW_QDISC   = "dualpi2";
 
 // ===== WIFI CONFIG =====
 const char* ssid     = "l4siotmaster";
