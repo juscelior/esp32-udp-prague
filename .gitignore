@@ -93,3 +93,6 @@ $RECYCLE.BIN/
 .claude
 .claude/
 .claude/*
+
+# Permite versionar logs apenas dos cenarios em experiments/
+!experiments/**/*.log
