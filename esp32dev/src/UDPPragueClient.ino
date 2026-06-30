@@ -3,11 +3,12 @@
 #include "lwip/inet.h"
 #include "prague_cc.h"
 #include <errno.h>
+#include "esp_timer.h"   // [INSTR] esp_timer_get_time() para medir custo de CPU por ACK
 
 // ===== CONGESTION CONTROL MODE =====
 // Default: full Prague CC (adaptive). Uncomment for a fixed baseline mode
 // that does not adapt window/rate based on Prague feedback.
-#define CC_MODE_BASELINE
+// #define CC_MODE_BASELINE
 
 // ===== ECN SENDER MARKING =====
 // ECN_SENDER_ENABLE = 1 -> mark packets as ECN-capable (ECT(1))
@@ -21,7 +22,7 @@
 // Update these per experiment to document the gateway/bottleneck settings.
 // Example values: "prague", "cubic", "reno" for CC, and
 // "dualpi2", "fq_codel" for qdisc.
-const char* GW_CC_ALGO = "reno";
+const char* GW_CC_ALGO = "prague";
 const char* GW_QDISC   = "dualpi2";
 
 // ===== WIFI CONFIG =====
@@ -72,7 +73,7 @@ const int   server_port = 5005;
 // ===== REALISTIC LIMITS FOR ESP32 =====
 // If MAX_WINDOW_ESP32 > 0: limit the maximum number of inflight packets on the ESP32.
 // If MAX_WINDOW_ESP32 == -1: do not apply a local window limit; use only the Prague window.
-static const int MAX_WINDOW_ESP32 = 10;
+static const int MAX_WINDOW_ESP32 = -1;
 static const int MAX_BURST_ESP32  = 5;     // safe burst size
 
 // ===== ADAPTIVE BURST =====
@@ -118,6 +119,18 @@ bool    has_last_rtt = false;
 time_tp rtt_min = 0, rtt_max = 0;
 int64_t rtt_sum = 0;
 uint32_t rtt_count = 0;
+
+// ===== [INSTR] CPU COST OF THE CONTROLLER (tempo de computacao por ACK) =====
+// Mede quanto tempo o update do controlador (Prague ou baseline) consome a
+// cada ACK. No modo baseline o valor sera ~0 (nao computa), o que serve de
+// contraste. Em microssegundos, lido do esp_timer (mesmo relogio do Now()).
+int64_t  cc_us_sum   = 0;   // soma do tempo no update do CC (us)
+int64_t  cc_us_max   = 0;   // pior caso observado (us)
+uint32_t cc_us_count = 0;   // nº de updates medidos (= nº de ACKs processados)
+
+// ===== [INSTR] RAM FOOTPRINT (medido em runtime) =====
+uint32_t heap_at_start = 0;            // heap livre no inicio da run (apos Wi-Fi)
+uint32_t heap_free_min = 0xFFFFFFFF;   // menor heap livre observado (= pico de uso)
 
 #pragma pack(push, 1)
 
@@ -249,6 +262,9 @@ void receiveAcks() {
     rtt_sum += rtt;
     rtt_count++;
 
+    // ===== [INSTR] inicio da medicao do custo de CPU do controlador =====
+    int64_t cc_t0 = esp_timer_get_time();
+
     // Feed congestion control (Prague or baseline)
 #ifndef CC_MODE_BASELINE
     // Full Prague CC: update rate/window/burst based on feedback
@@ -276,6 +292,12 @@ void receiveAcks() {
     packet_burst  = MAX_BURST_ESP32;
     // pacing_rate/packet_size are taken from the initial PragueCC config in setup()
 #endif
+
+    // ===== [INSTR] fim da medicao: acumula o tempo gasto no update do CC =====
+    int64_t cc_dt = esp_timer_get_time() - cc_t0;
+    cc_us_sum += cc_dt;
+    if (cc_dt > cc_us_max) cc_us_max = cc_dt;
+    cc_us_count++;
 
     // ===== RECALCULATE ACTUAL INFLIGHT (FIX #1) =====
     // Pacotes perdidos nunca serao "recebidos": sem descontar packets_lost,
@@ -313,6 +335,10 @@ void receiveAcks() {
         (long)packet_burst,
         (unsigned long long)pacing_rate
     );
+
+    // ===== [INSTR] amostra o heap livre (guarda o minimo = pico de uso) =====
+    uint32_t heap_now = ESP.getFreeHeap();
+    if (heap_now < heap_free_min) heap_free_min = heap_now;
 }
 
 // ===== SEND DATA PACKET =====
@@ -427,6 +453,10 @@ void setup() {
     nextSend = prague.Now() + 2000;
     test_start_ms = millis();
     last_ack_ms = millis();   // FIX #2: inicializa o watchdog
+
+    // ===== [INSTR] captura o heap livre de partida (apos Wi-Fi + socket) =====
+    heap_at_start = ESP.getFreeHeap();
+    heap_free_min = heap_at_start;
 }
 
 // ===== MAIN LOOP =====
@@ -449,6 +479,39 @@ void loop() {
             other_errors,
             watchdog_count
         );
+
+        // ===== [INSTR] resumo de RECURSOS (RAM + custo de CPU do controlador) =====
+        // Linha legivel + uma linha RSTATS; para parsing automatico no notebook.
+        Serial.printf(
+            "=== RESOURCE FOOTPRINT ===\n"
+            "CC compute per ACK: avg %.2f us, max %lld us (n=%lu)\n"
+            "Heap free at start: %lu bytes\n"
+            "Heap free minimum (peak usage): %lu bytes\n"
+            "Heap used (peak): %ld bytes\n"
+            "ESP min free heap (lifetime): %lu bytes\n"
+            "Task stack high-water mark: %u bytes free\n",
+            cc_us_count ? (double)cc_us_sum / (double)cc_us_count : 0.0,
+            (long long)cc_us_max,
+            (unsigned long)cc_us_count,
+            (unsigned long)heap_at_start,
+            (unsigned long)heap_free_min,
+            (long)((int32_t)heap_at_start - (int32_t)heap_free_min),
+            (unsigned long)ESP.getMinFreeHeap(),
+            (unsigned)uxTaskGetStackHighWaterMark(NULL)
+        );
+        // Linha compacta para o parser (todos os campos numericos):
+        Serial.printf(
+            "RSTATS;cc_avg_us=%.2f;cc_max_us=%lld;cc_n=%lu;heap_start=%lu;heap_min=%lu;heap_peak_used=%ld;esp_min_heap=%lu;stack_hwm=%u\n",
+            cc_us_count ? (double)cc_us_sum / (double)cc_us_count : 0.0,
+            (long long)cc_us_max,
+            (unsigned long)cc_us_count,
+            (unsigned long)heap_at_start,
+            (unsigned long)heap_free_min,
+            (long)((int32_t)heap_at_start - (int32_t)heap_free_min),
+            (unsigned long)ESP.getMinFreeHeap(),
+            (unsigned)uxTaskGetStackHighWaterMark(NULL)
+        );
+
         while (true) delay(1000);
     }
 
