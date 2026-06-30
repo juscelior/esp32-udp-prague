@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio run:*)",
+      "Bash(make clean:*)",
+      "Bash(make)",
+      "Bash(git add:*)",
+      "Bash(for d:*)",
+      "Bash(do echo:*)",
+      "Read(//Users/juscelioreis/Documents/code/master-l4s-iot/esp32-udp-prague/**)",
+      "Bash(done)",
+      "Bash(chmod +x /Users/juscelioreis/Documents/code/master-l4s-iot/esp32-udp-prague/scripts/run_experiments.sh)"
+    ]
+  }
+}
